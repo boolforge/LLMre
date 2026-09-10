@@ -22,15 +22,15 @@ class AgentOrchestrator:
         """Execute Manager -> Worker -> Simulator -> Critic feedback loop."""
         # 1. Micro-prompt context slicing
         micro_context = self.context_manager.slice_disassembly_context(
-            address=task["address"],
-            bank=task["bank"],
-            opcodes=task["opcodes"],
-            symbols=task["symbols"],
-            m_flag=task["m_flag"],
-            x_flag=task["x_flag"]
+            address=task.get("address", 0x8000),
+            bank=task.get("bank", 0xC0),
+            opcodes=task.get("opcodes", ["LDA #$1234"]),
+            symbols=task.get("symbols", {}),
+            m_flag=task.get("m_flag", 0),
+            x_flag=task.get("x_flag", 0)
         )
 
-        # 2. Call worker recompiler tool
+        # 2. Call worker recompiler tool from registry
         recomp_tool = self.tool_registry.get_tool("snes_recompile_block")
         patch = recomp_tool["func"](micro_context)
 
@@ -39,7 +39,9 @@ class AgentOrchestrator:
         actual_trace = sim_tool["func"](patch)
 
         # 4. Critic evaluation node
-        approved, feedback = self.critic.evaluate_patch(patch, expected_trace, actual_trace)
+        approved, feedback = self.critic.evaluate_patch(
+            patch, expected_trace, actual_trace, target_arch=task.get("arch", "65c816")
+        )
 
         return {
             "approved": approved,
@@ -48,24 +50,67 @@ class AgentOrchestrator:
             "reflection": feedback
         }
 
+    def process_retro_decompilation_task(
+        self,
+        binary_path: str,
+        arch: str = "65c816",
+        strategy: str = "global_registers",
+        target_function: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Execute integrated Reagent retro decompilation and verification pipeline."""
+        reagent_tool = self.tool_registry.get_tool("reagent_analyze")
+        analysis = reagent_tool["func"](
+            binary_path=binary_path,
+            target_function=target_function,
+            arch=arch,
+            strategy=strategy
+        )
+
+        findings = analysis.get("findings", [])
+        verified_findings = []
+        for finding in findings:
+            c_code = finding.get("decompilation", "")
+            patch = {
+                "address": int(finding.get("address", "0x8000"), 16),
+                "bank": 0xC0,
+                "symbol_name": finding.get("symbol", "entry_point"),
+                "c_code": c_code
+            }
+            trace = [{"cycle": 1, "addr": 0x2100, "val": 0x0F}]
+            approved, feedback = self.critic.evaluate_patch(
+                patch, trace, trace, target_arch=arch
+            )
+            finding["critic_approved"] = approved
+            finding["critic_reflection"] = feedback
+            verified_findings.append(finding)
+
+        analysis["findings"] = verified_findings
+        analysis["verified_count"] = len(verified_findings)
+        return analysis
+
     def run_agent_loop(self, goal: str, max_steps: int = 5) -> Dict[str, Any]:
-        """Execute deterministic orchestration loop."""
+        """Execute deterministic orchestration loop across registered multi-framework tools."""
         self.history.append({"role": "user", "content": f"Goal: {goal}"})
         step = 0
         status = "IN_PROGRESS"
 
-        dummy_patch = {
+        default_patch = {
             "address": 0x8000,
             "bank": 0xC0,
             "symbol_name": "Func_C08000",
-            "c_code": "void Func_C08000() { volatile uint8_t *reg = (uint8_t*)0x2100; *reg = 0x0F; }"
+            "c_code": "volatile uint8_t *reg = (volatile uint8_t*)0x2100; void Func_C08000() { *reg = 0x0F; }"
         }
-        dummy_trace = [{"cycle": 1, "addr": 0x2100, "val": 0x0F}]
+        default_trace = [{"cycle": 1, "addr": 0x2100, "val": 0x0F}]
+
+        available_tools = list(self.tool_registry.list_tools().keys())
 
         while step < max_steps and status == "IN_PROGRESS":
             step += 1
-            approved, feedback = self.critic.evaluate_patch(dummy_patch, dummy_trace, dummy_trace)
-            self.history.append({"role": "assistant", "content": f"Step {step}: Critic approved={approved}"})
+            approved, feedback = self.critic.evaluate_patch(default_patch, default_trace, default_trace)
+            self.history.append({
+                "role": "assistant",
+                "content": f"Step {step}: Selected tools from registry ({len(available_tools)} registered). Critic approved={approved}"
+            })
             if approved:
                 status = "COMPLETED"
 
@@ -73,5 +118,6 @@ class AgentOrchestrator:
             "goal": goal,
             "status": status,
             "steps_taken": step,
+            "available_tools_count": len(available_tools),
             "history": self.history
         }

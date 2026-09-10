@@ -25,3 +25,15 @@ def test_cli_agent_loop():
     result = runner.invoke(cli, ['agent-loop', '--goal', 'Recompile Bank C0', '--steps', '2'])
     assert result.exit_code == 0
     assert "Goal completed successfully" in result.output
+
+def test_cli_list_tools():
+    runner = CliRunner()
+    result = runner.invoke(cli, ['list-tools'])
+    assert result.exit_code == 0
+    assert "Registered Tools" in result.output
+
+def test_cli_rpt_recompile():
+    runner = CliRunner()
+    result = runner.invoke(cli, ['rpt-recompile', '--engine', 'N64Recomp', '--rom', 'mario64.z64'])
+    assert result.exit_code == 0
+    assert "RetroPortingToolkit" in result.output

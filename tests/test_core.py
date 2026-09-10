@@ -40,9 +40,12 @@ def test_context_manager():
 
 
 def test_tool_registry():
-    registry = ToolRegistry()
+    registry = ToolRegistry(auto_register_defaults=True)
     registry.register_tool("dummy_tool", "framework", "Dummy test tool", lambda x: x * 2)
     assert registry.execute_tool("dummy_tool", x=5) == 10
+    assert len(registry.list_tools()) > 10
+    assert "reagent_analyze" in registry.list_tools()
+    assert "cpu_lift_65c816" in registry.list_tools()
 
 
 def test_critic_and_orchestrator():
@@ -79,3 +82,7 @@ def test_critic_and_orchestrator():
 
     assert result["approved"]
     assert result["reflection"]["status"] == "PASSED"
+
+    retro_res = orchestrator.process_retro_decompilation_task("dummy_rom.sfc", arch="65c816", strategy="global_registers")
+    assert retro_res["status"] == "SUCCESS"
+    assert retro_res["verified_count"] > 0
