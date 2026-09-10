@@ -14,11 +14,18 @@ def cli():
 @cli.command()
 @click.option('--binary', required=True, help='Path to target binary ROM or executable')
 @click.option('--arch', default='65c816', help='Target CPU architecture')
-def decompile(binary: str, arch: str):
+@click.option('--strategy', default='global_registers', type=click.Choice(['global_registers', 'high_level_refactoring']), help='C generation strategy')
+@click.option('--framework', default='reagent', type=click.Choice(['reagent', 'ghidra', 'reko']), help='Backend framework engine')
+def decompile(binary: str, arch: str, strategy: str, framework: str):
     """Decompile binary using specified architecture lifter or Reagent adapter."""
-    click.echo(f"[+] Decompiling {binary} for architecture: {arch}")
-    reagent = ReagentAdapter()
-    res = reagent.run_reagent_analysis(binary)
+    click.echo(f"[+] Decompiling {binary} (Arch: {arch}, Framework: {framework}, Strategy: {strategy})")
+    orch = AgentOrchestrator()
+    if framework == 'reagent':
+        res = orch.process_retro_decompilation_task(binary_path=binary, arch=arch, strategy=strategy)
+    elif framework == 'ghidra':
+        res = orch.tool_registry.execute_tool("ghidra_headless_analyze", binary_path=binary, script_name="ExportC.py")
+    else:
+        res = orch.tool_registry.execute_tool("reko_decompile", binary_path=binary, arch=arch)
     click.echo(json.dumps(res, indent=2))
 
 @cli.command()
@@ -55,6 +62,27 @@ def agent_loop(goal: str, steps: int):
     orch = AgentOrchestrator()
     res = orch.run_agent_loop(goal, max_steps=steps)
     click.echo(f"[+] Goal completed successfully: {res['status']}")
+
+@cli.command()
+@click.option('--category', default=None, help='Filter tools by category (framework, cpu, platform)')
+def list_tools(category: str):
+    """List all auto-registered tools in central ToolRegistry."""
+    from core.tool_registry import ToolRegistry
+    reg = ToolRegistry()
+    tools = reg.list_tools(category=category)
+    click.echo(f"[+] Registered Tools ({len(tools)} found):")
+    click.echo(json.dumps(tools, indent=2))
+
+@cli.command()
+@click.option('--engine', required=True, help='RetroPortingToolkit engine name (e.g. N64Recomp, NESRecomp)')
+@click.option('--rom', required=True, help='Path to target ROM file')
+@click.option('--out-dir', default='./recompiled_output', help='Output directory')
+def rpt_recompile(engine: str, rom: str, out_dir: str):
+    """Invoke RetroPortingToolkit recompiler suite engine."""
+    click.echo(f"[+] Invoking RetroPortingToolkit engine '{engine}' on {rom}...")
+    rpt = RetroPortingToolkitPlugin()
+    res = rpt.invoke_recompiler(recompiler_name=engine, config={"target_file": rom, "out_dir": out_dir})
+    click.echo(json.dumps(res, indent=2))
 
 if __name__ == '__main__':
     cli()

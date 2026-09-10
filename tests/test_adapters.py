@@ -29,7 +29,21 @@ def test_rpt_adapter():
 
 def test_reagent_adapter():
     reagent = ReagentAdapter()
-    res = reagent.run_reagent_analysis("dummy.elf")
-    assert res["status"] in ["SUCCESS", "fallback"]
-    parity = reagent.verify_decompilation_parity("nop", "void f() {}")
+    res = reagent.run_reagent_analysis("dummy.elf", arch="z80", strategy="global_registers")
+    assert res["status"] == "SUCCESS"
+    assert "prompt_profile" in res
+    assert res["prompt_profile"]["arch"] == "z80"
+
+    prompt = reagent.generate_retro_prompt(arch="6502", strategy="high_level_refactoring")
+    assert "6502" in prompt["system_prompt"]
+    assert prompt["strategy"] == "high_level_refactoring"
+
+    val_ok = reagent.validate_with_retro_compiler("volatile uint8_t *reg = (uint8_t*)0x2100;\nvoid main() { *reg = 1; }", target_arch="6502")
+    assert val_ok["status"] == "PASSED"
+
+    val_bad = reagent.validate_with_retro_compiler("void main() { int *p = malloc(10); }", target_arch="z80")
+    assert val_bad["status"] == "REJECTED"
+    assert "forbidden" in val_bad["errors"][0]
+
+    parity = reagent.verify_decompilation_parity("nop", "volatile uint8_t a = 0; void f() {}")
     assert parity["parity_exact"] == True
